@@ -41,7 +41,7 @@ class Layout:
     obstacle_half: float = 7.5
     o0: tuple = (80.0, 75.0)                # start centre
     o1: tuple = (80.0, 45.0)                # end centre: slides 30 cm in -y, stopped by a bead
-    obstacle_slide_cm_s: float = 60.0       # pull speed, for the simulator (estimate; time a pull)
+    obstacle_slide_cm_s: float = 37.5       # simulator: 30 cm in ~0.8 s (user estimate, 2026-11-15); time a real pull
 
     # Clearance rules (brief 4 and 7).
     edge_margin: float = 5.0                # footprint stays this far inside the walls...
@@ -72,6 +72,12 @@ class Layout:
 
     # HH/HL obstacle event (brief 5).
     event_stop_travel_cm: float = 23.5      # fixed travel before the stop (not sensor-based)
+    # HL only (user, 2026-11-15): a short lead-in straight so the smooth profile
+    # doesn't start on a full-lock arc from standstill. The stop stays on a
+    # straight (F 0 5 -> F R R30 30 -> F 0 4), so stopping +/-2 cm early/late
+    # only moves the arrival at C ~1 cm sideways. HH keeps the brief's start.
+    event_hl_lead_in_cm: float = 5.0
+    event_hl_stop_travel_cm: float = 24.7   # 5 + 15.7 (arc) + 4.0
     event_late_cm: float = 27.0             # validated reading above this -> OBSTACLE_LATE
 
     # Tape stops per target (brief 6.5). Strips are dark tape across the path:
@@ -81,10 +87,13 @@ class Layout:
     tape: dict = field(default_factory=lambda: {t: TapeStop() for t in "ABCD"})
 
     # Operator cue offsets in seconds, relative to the PULL cue (brief 8).
-    operator_reaction_s: float = 0.2        # simulator only: cue -> line starts moving
+    operator_reaction_s: float = 0.2        # simulator only: cue -> line starts moving (user estimate)
     cue: dict = field(default_factory=lambda: {
         "HH": 0.3,          # robot starts the A→C drive 0.3 s after the cue
-        "HL": 0.0,          # robot starts with the cue
+        # HL robot starts 0.3 s after the cue (user, 2026-11-15): with the 5 cm
+        # lead-in the stop came 1.1 s after the cue, only ~0.1 s after the
+        # obstacle arrives; +0.3 s puts the stop at ~1.4 s (brief 8).
+        "HL": 0.3,
         "LH": 0.0,          # cue when the first pivot of A→C finishes
     })
 

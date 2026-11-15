@@ -98,12 +98,18 @@ def check_profile(profile, layout=DEFAULT_LAYOUT, car=None):
         # ramps (warnings: the leg still runs, just without that ramp)
         if beh.ramp_fracs:
             first = leg.segments[0]
-            if first.is_arc or first.length < car.ramp_cm:
-                rep.warnings.append("%s starts with %s: no %.0f cm straight to ramp up on, starts at constant speed"
-                                    % (tag, first, car.ramp_cm))
-            if last.is_arc or last.length < car.ramp_cm:
-                rep.warnings.append("%s ends with %s: shorter than the %.0f cm ramp, slows down on the last arc"
-                                    % (tag, last, car.ramp_cm))
+            if first.is_arc:
+                rep.warnings.append("%s starts with %s: no straight to ramp up on, starts at constant speed"
+                                    % (tag, first))
+            elif first.length < car.ramp_cm:
+                rep.warnings.append("%s starts with %s: ramp-up squeezed into %.1f cm (ramp_cm %.0f)"
+                                    % (tag, first, first.length, car.ramp_cm))
+            if last.is_arc:
+                rep.warnings.append("%s ends with %s: no straight to slow down on, stops at the end of the arc"
+                                    % (tag, last))
+            elif last.length < car.ramp_cm:
+                rep.warnings.append("%s ends with %s: ramp-down squeezed into %.1f cm (ramp_cm %.0f)"
+                                    % (tag, last, last.length, car.ramp_cm))
 
         # LH: even if the stop only happens at the cap, keep clear of the slide strip
         if profile == "LH" and leg.start == leg.end:
@@ -239,13 +245,13 @@ def run_solver(layout, car):
          solver.solve(A, B, O0, car, layout, side1="R", lead_in=max(10.0, car.ramp_cm), min_clear=mc["CLOSE"],
                       max_clear=layout.max_clearance["CLOSE"]),
          paths.CLOSE)
-    backup = g.end_pose(g.end_pose(A, paths.event_approach(layout.event_stop_travel_cm), off),
-                        paths.EVENT_BACKUP, off)
+    backup = g.end_pose(g.end_pose(A, paths.event_geometry("HH", layout)[0], off), paths.EVENT_BACKUP, off)
     show("EVENT re-plan from (%.1f, %.1f, %.0f deg), >= %.0f cm to O1" % (backup.x, backup.y, backup.h, mc["EVENT"]),
          solver.solve(backup, C, O1, car, layout, side1="L", lead_in=0, min_clear=mc["EVENT"],
                       angles=solver.frange(16, 45, 1), r1s=solver.frange(car.min_radius, 60, 5),
                       r2s=solver.frange(60, 250, 10), max_mid=40.0),
          paths.EVENT_REPLAN)
+    print("  (HH's event; HL uses a 5 cm lead-in, see paths.EVENT_REPLAN_HL)")
     print("\nThe solver prints; it never edits paths.py. Paste a solution in by hand, then rerun plan.py.")
 
 

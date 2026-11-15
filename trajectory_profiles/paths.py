@@ -125,9 +125,26 @@ EVENT_BACKUP = segs("B R R30 15")                                       # surpri
 EVENT_REPLAN = segs("F L R40 23 | F 0 33.5 | F R R120 8 | F 0 25.0")    # re-plan to C, brief 5.5
 
 
-def event_approach(travel_cm):
-    """The planned 'under' path, cut after `travel_cm` of travel (brief 5.2)."""
-    return [EVENT_ARC, _straight(max(0.0, travel_cm - EVENT_ARC.length))]
+# HL's re-plan to C from its back-up pose (35.9, 69.7, -15°): the brief's
+# radii and angles (R40 23°, R120 8°), straights solved with
+# solver.two_arc(backup, C, 0, "L", 23, 40, 120). O1 clearance 12.7 cm.
+EVENT_REPLAN_HL = segs("F L R40 23 | F 0 20.29 | F R R120 8 | F 0 36.06")
+
+
+def event_approach(travel_cm, lead_in_cm=0.0):
+    """The planned 'under' path (optionally after a lead-in straight), cut
+    after `travel_cm` of travel in total (brief 5.2)."""
+    lead = [_straight(lead_in_cm)] if lead_in_cm > 0 else []
+    return lead + [EVENT_ARC, _straight(max(0.0, travel_cm - lead_in_cm - EVENT_ARC.length))]
+
+
+def event_geometry(profile, layout):
+    """(approach, back-up, re-plan, travel) of the obstacle event for HH or HL."""
+    if profile == "HL":
+        travel = layout.event_hl_stop_travel_cm
+        return (event_approach(travel, layout.event_hl_lead_in_cm), EVENT_BACKUP, EVENT_REPLAN_HL, travel)
+    travel = layout.event_stop_travel_cm
+    return event_approach(travel), EVENT_BACKUP, EVENT_REPLAN, travel
 
 
 def event_planned():
@@ -166,15 +183,15 @@ def legs(profile, layout, car):
     A = layout.target("A")
     lane_b = lh_lane_ab(layout, car)
     lane_d = g.mirror(lane_b)
-    ev_driven = event_approach(layout.event_stop_travel_cm)
 
     def event(n):
+        approach, backup, replan, travel = event_geometry(profile, layout)
         return Leg(n, "A->C event", "A", "C", [
-            Phase("approach (obstacle moving)", ev_driven, "SWEEP", "EVENT"),
-            Phase("surprise back-up", EVENT_BACKUP, "O1", "EVENT"),
-            Phase("re-plan to C", EVENT_REPLAN, "O1", "EVENT")],
-            planned=[(A, event_planned())], planned_kind=None,
-            note="stop after %.1f cm of travel, then back up and re-plan" % layout.event_stop_travel_cm)
+            Phase("approach (obstacle moving)", approach, "SWEEP", "EVENT"),
+            Phase("surprise back-up", backup, "O1", "EVENT"),
+            Phase("re-plan to C", replan, "O1", "EVENT")],
+            planned=[(A, approach[:-1] + event_planned()[1:])], planned_kind=None,
+            note="stop after %.1f cm of travel, then back up and re-plan" % travel)
 
     if profile == "HH":
         return [

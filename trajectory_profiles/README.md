@@ -201,11 +201,17 @@ every servo centres on any error, abort or interrupt.
 
 | Profile | Cue | Robot |
 |---|---|---|
-| HH | PULL at t = 0 | starts the A→C drive at +0.3 s, stops ≈1.0 s |
-| HL | PULL at t = 0 | starts at once, stops ≈1.4 s |
+| HH | PULL at t = 0 | starts the A→C drive at +0.3 s, stops ≈1.1 s |
+| HL | PULL at t = 0 | starts the A→C drive at **+0.3 s**, stops ≈1.4 s |
 | LH | PULL when the first pivot of A→C is done | must be at O1 before the car enters the lower lane (~2.5 s later) |
 
-Offsets live in `Layout.cue`. At the HH/HL stop, the ultrasonic confirms the
+The start offsets live in `Layout.cue` (`"HH": 0.3`, `"HL": 0.3`). The obstacle
+needs about 1.0 s to reach O1 (≈0.2 s reaction + ≈0.8 s to slide 30 cm; the
+simulator uses these, `Layout.operator_reaction_s` / `obstacle_slide_cm_s`), so
+HL's stop at ≈1.4 s leaves ≈0.4 s of margin. HH's stop at ≈1.1 s leaves only
+≈0.1 s: pull promptly on HH, or raise `cue["HH"]`.
+
+At the HH/HL stop, the ultrasonic confirms the
 obstacle: a validated reading above 27 cm logs `OBSTACLE_LATE` and **ends the
 take** (`RETAKE`). The car is already stopped and does not back up or re-plan,
 because the re-plan to C crosses O0, where a late obstacle still is. Reset and
@@ -260,6 +266,8 @@ retraces to A; at that cap it is 9.5 cm from the obstacle's slide strip
   20 cm cap.
 * The planned (never driven) LH A→C detour can only clear O0 by 5.3 cm with
   R30 pivots; it is drawn in the plot only.
-* The HH/HL event starts on a full-lock arc from standstill. For HL this is
-  more abrupt than its other legs (turns at ~48°/s from rest); a lead-in
-  straight has been proposed but not applied.
+* HH's event starts on a full-lock arc from standstill (the brief's design;
+  it reads as quick and decisive). HL's starts with a 5 cm straight instead
+  (`F 0 5 → F R R30 30 → F 0 4`, then the re-plan `F L R40 23 → F 0 20.29 →
+  F R R120 8 → F 0 36.06`): without it HL turned at ~48°/s from rest, far
+  more abruptly than its other legs.

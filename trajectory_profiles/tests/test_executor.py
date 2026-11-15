@@ -219,7 +219,7 @@ class Takes(unittest.TestCase):
         self.assertIn("RETAKE", names(t))
         self.assertNotIn("ABORT", names(t))              # ended before the re-plan, not by the hard stop
         # it never drove the back-up or the re-plan: it is still where the approach stopped
-        stop = g.end_pose(LAYOUT.target("A"), paths.event_approach(LAYOUT.event_stop_travel_cm), CAR.rear_to_centre)
+        stop = g.end_pose(LAYOUT.target("A"), paths.event_geometry("HH", LAYOUT)[0], CAR.rear_to_centre)
         self.assertLess(g.pose_error(sim.pose(), stop)[0], 2.0)
         self.assertGreater(sim.min_obstacle_clearance, 15.0)
         at_rest_and_centred(self, sim)
@@ -247,11 +247,16 @@ class Takes(unittest.TestCase):
         self.assertAlmostEqual(sim.pose().x, 20, delta=1.5)   # still retraced to A
 
     def test_cue_timing(self):
-        for profile, leg, expect in (("HH", 3, 1.0), ("HL", 5, 1.4)):
+        reach = LAYOUT.operator_reaction_s + 30 / LAYOUT.obstacle_slide_cm_s     # obstacle at O1
+        for profile, leg, expect, tol in (("HH", 3, 1.0, 0.15), ("HL", 5, 1.4, 0.1)):
             ok, sim, t, recs = take(profile, only_leg=leg)
+            self.assertTrue(ok, profile)
             cue = [s for s, k in recs if k.get("event") == "CUE"][0]
-            stop = [s for s, k in recs if k["kind"] == "segment" and k["segment"].startswith("F 0 7.79")][0]
-            self.assertAlmostEqual(stop - cue, expect, delta=0.35, msg=profile)
+            last = len(paths.event_geometry(profile, LAYOUT)[0]) - 1     # the approach's last segment
+            stop = [s for s, k in recs if k["kind"] == "segment" and k["index"] == last][0]
+            self.assertAlmostEqual(stop - cue, expect, delta=tol, msg=profile)
+            self.assertLess(cue + reach, stop, profile)                 # obstacle there before the stop
+        self.assertAlmostEqual(LAYOUT.cue["HL"], 0.3)                   # the HL delay lives in the config
         # LH: cue when the first pivot is done; obstacle in place before the lower lane
         ok, sim, t, recs = take("LH", only_leg=3)
         cue = [s for s, k in recs if k.get("event") == "CUE"][0]

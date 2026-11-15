@@ -234,6 +234,50 @@ class Event(unittest.TestCase):
         self.assertLess((arrive[21.5].y - arrive[23.5].y) * (arrive[25.5].y - arrive[23.5].y), 0)
 
 
+class HLEvent(unittest.TestCase):
+    """HL's event: 5 cm lead-in, stop on a straight, re-plan with the brief's radii."""
+
+    def geometry(self, travel=None):
+        approach, backup, replan, nominal = paths.event_geometry("HL", LAYOUT)
+        if travel is not None:
+            approach = paths.event_approach(travel, LAYOUT.event_hl_lead_in_cm)
+        return approach, backup, replan
+
+    def test_starts_on_a_straight_and_stops_on_one(self):
+        approach, _, _ = self.geometry()
+        self.assertEqual(str(approach[0]), "F 0 5")
+        self.assertFalse(approach[-1].is_arc)
+        self.assertAlmostEqual(approach[-1].length, 4.0, delta=0.05)
+        self.assertGreaterEqual(approach[-1].length, 2.0)        # a 2 cm early stop stays off the arc
+
+    def test_stop_sensor_and_replan(self):
+        approach, backup, replan = self.geometry()
+        stop = g.end_pose(A, approach, OFF)
+        self.assertAlmostEqual(paths.ultrasonic_reading(stop, LAYOUT, CAR, "O1"), 20.2, delta=0.5)
+        self.assertLess(paths.ultrasonic_reading(stop, LAYOUT, CAR, "O1"), LAYOUT.event_late_cm)
+        b = g.end_pose(stop, backup, OFF)
+        self.assertAlmostEqual(b.h, -15, places=6)
+        self.assertLess(g.pose_error(g.end_pose(b, replan, OFF), C)[0], 0.5)
+        self.assertGreaterEqual(clear(b, replan, O1), LAYOUT.min_clearance["EVENT"])
+        self.assertEqual([(s.side, s.radius) for s in replan if s.is_arc], [("L", 40), ("R", 120)])
+
+    def test_sensitivity(self):
+        nominal = LAYOUT.event_hl_stop_travel_cm
+        arrive = {}
+        for dt in (-2, 0, 2):
+            approach, backup, replan = self.geometry(nominal + dt)
+            arrive[dt] = g.end_pose(g.end_pose(g.end_pose(A, approach, OFF), backup, OFF), replan, OFF)
+        for dt in (-2, 2):
+            self.assertAlmostEqual(abs(arrive[dt].y - arrive[0].y), 1.0, delta=0.3)
+            self.assertAlmostEqual(arrive[dt].h, 0.0, places=6)
+
+    def test_hh_keeps_the_brief_start(self):
+        approach, _, replan, travel = paths.event_geometry("HH", LAYOUT)
+        self.assertEqual(str(approach[0]), "F R R30 30")
+        self.assertEqual(replan, paths.EVENT_REPLAN)
+        self.assertEqual(travel, 23.5)
+
+
 class LHStop(unittest.TestCase):
     def test_expected_sensor_stop(self):
         d = paths.lh_lane_stop_cm(LAYOUT, CAR)
