@@ -13,8 +13,12 @@ Emergency stop: Enter, Ctrl+C or SIGTERM. The motors stop and every servo
 centres on any error, abort or interrupt. Reverse moves are UNGUARDED (no
 rear sensor): keep the area behind A clear.
 
-Refuses to run if plan.py's checks fail for the current car model. Until
-every calibrate.py check passes, speeds are capped at 50 %.
+Calibration never blocks a run. Every value whose calibrate.py check passed
+is used; anything missing or failed falls back to its default, listed at
+startup and in the CSV log. Speed is capped at 50 % only while the speed or
+radius table is missing or failed (--no-cap removes the cap). Without a
+grayscale threshold, tape stops fall back to timed stops.
+It still refuses to run if plan.py's geometry checks fail for the car model.
 Every segment and sensor event goes to logs/<profile>_<timestamp>.csv.
 """
 import argparse
@@ -33,7 +37,6 @@ from trajectory_profiles.motion import Motion, check_radius_consistency  # noqa:
 from trajectory_profiles.params import PROFILES as BEHAVIOURS  # noqa: E402
 from trajectory_profiles.plan import check_profile  # noqa: E402
 
-UNCALIBRATED_SPEED_SCALE = 0.5      # brief 6.6: 50 % until calibration has passed
 HERE = os.path.dirname(os.path.abspath(__file__))
 FIELDS = ["t", "kind", "leg", "index", "segment", "driven", "steer", "cmd", "planned_s", "actual_s",
           "event", "detail"]
@@ -95,7 +98,10 @@ def main(argv=None):
     ap.add_argument("--sim", action="store_true", help="simulated car (no hardware)")
     ap.add_argument("--dry-run", action="store_true", help="print the segment table only")
     ap.add_argument("--speed-scale", type=float, default=None,
-                    help="multiply every speed (default 1.0 if calibrated, else 0.5)")
+                    help="multiply every speed (default 1.0; 0.5 while speed/radius tables are missing)")
+    ap.add_argument("--calibration", default=calibration.PATH, help="calibration.json to use")
+    ap.add_argument("--no-cap", action="store_true",
+                    help="never cap the speed, even without speed/radius calibration")
     ap.add_argument("--seed", type=int, default=0, help="sim: sensor-noise seed")
     ap.add_argument("--late", action="store_true", help="sim: nobody pulls the line (tests OBSTACLE_LATE / NO_OBSTACLE)")
     args = ap.parse_args(argv)
@@ -103,16 +109,11 @@ def main(argv=None):
     if args.profile == "LL":
         raise NotImplementedError("Profile LL is out of scope for this framework (brief section 1).")
 
-    cal = calibration.load()
-    car = calibration.car_model(cal)
-    motion = Motion(calibration.tables(cal))
+    cal = calibration.load(args.calibration)
+    res, scale, tape_stops = calibration.startup(cal, sim=args.sim, no_cap=args.no_cap,
+                                                 speed_scale=args.speed_scale)
+    car, motion = res.car, Motion(res.tables)
     layout = LAYOUT
-
-    scale = args.speed_scale if args.speed_scale is not None else 1.0
-    if not args.sim and not calibration.all_passed(cal) and scale > UNCALIBRATED_SPEED_SCALE:
-        print("Calibration incomplete -> speeds capped at %.0f%%. Run calibrate.py."
-              % (UNCALIBRATED_SPEED_SCALE * 100))
-        scale = UNCALIBRATED_SPEED_SCALE
 
     rep = check_profile(args.profile, layout, car)
     problems = rep.fails + check_radius_consistency(motion, car)
@@ -132,7 +133,7 @@ def main(argv=None):
     if args.sim:
         from trajectory_profiles.sim import ArenaSim
         start = layout.target(paths.legs(args.profile, layout, car)[args.leg - 1].start) if args.leg else None
-        sim = ArenaSim(layout, car, start=start, tables=calibration.tables(cal), seed=args.seed,
+        sim = ArenaSim(layout, car, start=start, tables=res.tables, seed=args.seed,
                        strips=list(profiles.strips(args.profile, layout, car, motion).values()))
         if args.late:
             sim.start_pull = lambda delay=0.0: None
@@ -149,8 +150,12 @@ def main(argv=None):
     stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     log = CsvLog(os.path.join(HERE, "logs", "%s%s_%s%s.csv" % (
         args.profile, "_leg%d" % args.leg if args.leg else "", stamp, "_sim" if args.sim else "")), clock)
+    log(kind="calibration", detail="measured: %s" % (" ".join(res.measured) or "none"))
+    log(kind="calibration", detail="defaults: %s" % (" ".join("%s[%s]" % d for d in res.defaults) or "none"))
+    log(kind="calibration", detail="speed_scale=%.2f no_cap=%s tape_stops=%s" % (scale, args.no_cap, tape_stops))
     ex = Executor(car_hw, motion, clock=clock, estop=estop, ranger=ranger, record=log, ramp_cm=car.ramp_cm)
-    take = profiles.Take(args.profile, ex, layout, car, motion, speed_scale=scale, sim=sim)
+    take = profiles.Take(args.profile, ex, layout, car, motion, speed_scale=scale, sim=sim,
+                         tape_stops=tape_stops)
     print("Profile %s (%s), speed scale %.2f%s" % (args.profile, BEHAVIOURS[args.profile].name, scale,
                                                     " [SIM]" if args.sim else ""))
     try:
@@ -161,7 +166,7 @@ def main(argv=None):
     finally:
         ex.safe_shutdown()
         log.close()
-    flagged = [e for e in take.events if e[1] in ("OBSTACLE_LATE", "TAPE_MISSED", "NO_OBSTACLE", "ESTOP", "ABORT")]
+    flagged = [e for e in take.events if e[1] in ("OBSTACLE_LATE", "RETAKE", "TAPE_MISSED", "NO_OBSTACLE", "ESTOP", "ABORT")]
     for leg, name, detail in flagged:
         print("  !! %s %s %s" % (leg, name, detail))
     if args.sim:
@@ -170,6 +175,8 @@ def main(argv=None):
               "collided=%s, %.1f s" % (p.x, p.y, p.h, sim.min_obstacle_clearance, sim.min_edge_clearance,
                                        sim.collided, sim.t))
     print("log: %s" % log.path)
+    if any(e[1] == "RETAKE" for e in take.events):
+        print("RETAKE: the obstacle was late; the take was ended safely. Reset and run it again.")
     print("%s" % ("take completed" if ok and not flagged else "take NOT clean: redo it" if ok else "take stopped"))
     return 0 if ok else 1
 

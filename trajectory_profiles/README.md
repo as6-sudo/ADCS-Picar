@@ -58,13 +58,17 @@ reuses their e-stop, reading validation, hard-minimum constants and `SimCar`.
 | Curve | Segments | Clearance to O0 |
 |---|---|---|
 | MAIN | `F 0 8 → F R R30 49 → F 0 0.59 → F L R85 49 → F 0 9.82` | 12.8 cm |
-| ALT | `F 0 8 → F R R35 49 → F 0 0.59 → F L R80 49 → F 0 9.82` | 10.5 cm |
+| ALT | `F 0 8 → F R R30 58 → F 0 2.8 → F L R50 58 → F 0 27.7` | 12.8 cm |
 | CLOSE | `F 0 10 → F R R40 47 → F 0 6.9 → F L R70 47 → F 0 9.9` | 6.7 cm (on purpose) |
 
-MAIN and ALT were re-solved from the brief's versions so that they start and
-end with a straight at least `ramp_cm` (8 cm) long: speed ramps never happen
-inside an arc, and the retraced legs end on a straight, so the tape stop at A
-works. The brief's versions are kept as `MAIN_BRIEF` / `ALT_BRIEF`.
+MAIN and ALT start and end with a straight at least `ramp_cm` (8 cm) long:
+speed ramps never happen inside an arc, and the retraced legs end on a
+straight, so the tape stop at A works. MAIN keeps the long sweeping arc. ALT
+is chosen to look **different** from MAIN on camera (HL legs 1 and 2): a
+steeper dive, an early flatten and a long final straight. It is selected by
+the largest sideways distance from MAIN's path (`geometry.path_difference`,
+5.3 cm) with at least 9 cm to O0; `plan.py` prints this difference. The
+brief's versions are kept as `MAIN_BRIEF` / `ALT_BRIEF`.
 
 ## Setup
 
@@ -88,8 +92,26 @@ bell + big text) then appears on the laptop. The robot never beeps.
 ## Calibration order
 
 Run `python3 trajectory_profiles/calibrate.py` on the car (or `--only <check>`).
-Each check saves to `calibration.json` (git-ignored, one per car). Until every
-check passes, `run.py` caps speed at 50 %.
+Each check saves to `calibration.json` (git-ignored, one per car).
+
+**Calibration never blocks a run.** `run.py` and `repeat.py` always run,
+whether `calibrate.py` was never run, partly failed or fully passed:
+
+* every value whose check **passed** is used; anything missing or failed falls
+  back to its default. The startup message lists exactly which values are
+  defaults and why (check not run / check failed), and the run's CSV log has
+  `calibration` rows with the measured and default values;
+* speed is capped at 50 % **only** while `speed_table` or `radius_table` is
+  missing or failed. `--no-cap` removes the cap (with a one-line warning);
+* other checks only affect their own feature: no `grayscale_threshold` →
+  tape stops are off and legs end on timed stops; no `grayscale_offset`,
+  `servo_swing`, `footprint` or `steering_trim` → a warning, estimates used;
+* `car.ramp_cm`, `speed_tau_s`, `servo_settle_s` and `stop_settle_s` are
+  estimates that no check measures (also listed at startup).
+
+`run.py` still refuses if `plan.py`'s geometry checks fail for the car model
+(e.g. a measured footprint too wide for CLOSE): that is a path-safety rule,
+not a calibration gate.
 
 1. **api**: the installed picarx has every method used here.
 2. **ultrasonic**: 30 readings at 30 cm.
@@ -111,8 +133,9 @@ check passes, `run.py` caps speed at 50 %.
     optionally drive at a strip at ~17, 35 and 50 cm/s to measure how far the
     car coasts past it (`tape_overshoot`).
 
-Then copy `calibration.json` to the laptop and run `plan.py`: with the measured
-car, every check must still pass (run.py refuses otherwise).
+Then copy `calibration.json` to the laptop and run
+`python trajectory_profiles/plan.py --calibration calibration.json`: with the
+measured car, every geometry check must still pass (run.py refuses otherwise).
 
 ## Floor-taping guide
 
@@ -126,7 +149,14 @@ All coordinates in cm from the bottom-left corner of the 150 × 150 arena.
 | Obstacle end O1 | centre (80, 45): it slides 30 cm in −y |
 | Eyelet | fixed on the south edge at x = 80 (y = 0) |
 | Bead / knot | on the line so the obstacle stops exactly at O1 (centre y = 45, i.e. its south face at y = 37.5) |
-| Arena edge | keep walls, if any, **outside** 150 × 150 (see Troubleshooting) |
+| **East side** | **no wall or object within 40 cm east of x = 150** (i.e. nothing at x < 190) |
+| Other edges | keep walls, if any, outside 150 × 150 |
+
+**Why the east side must be open:** arriving at B, C or D the car faces +x
+with its ultrasonic about 13 cm ahead of the centre (x ≈ 138). A wall at
+x = 150 would read ~12 cm, right at the hard-stop distance, so the car could
+abort at the targets. Nothing within 40 cm east of the arena keeps every
+reading there above ~50 cm.
 
 **Tape strips** (dark tape, 2.5 cm wide along x, 12 cm long along y, centred on
 the target's y). Print the exact positions for the current calibration with
@@ -154,13 +184,14 @@ target's tape stop can be switched off or put in `last_n` mode in
 3. **Keep the area behind A clear.** Reverse moves have no sensor (B→A, C→A,
    D→A and every LH retrace end by backing into A); nothing and nobody behind
    the car.
-4. Start at 50 % speed (the default until calibration passes): `run.py HH --leg 1`.
+4. Start slow: `run.py HH --leg 1` (50 % automatically while the speed or
+   radius table is missing; `--speed-scale 0.5` otherwise).
 5. Test **one leg at a time** (`--leg N`, car placed at that leg's start, obstacle
    where that leg needs it). Watch the PULL cue timing on the event legs.
 6. Run **5 repeats per leg** with `repeat.py <profile> <leg>` and follow its
    recommendation (tape the X / enable the tape stop / tune the curve).
 7. Then full takes: `run.py HH`. A take is clean only if the script ends with
-   `take completed` (no `OBSTACLE_LATE`, `TAPE_MISSED`, `NO_OBSTACLE`, abort or
+   `take completed` (no `RETAKE`, `TAPE_MISSED`, `NO_OBSTACLE`, abort or
    e-stop). Every run writes `logs/<profile>_<timestamp>.csv`.
 
 Emergency stop at any moment: **Enter**, Ctrl+C or SIGTERM. The motors stop and
@@ -175,10 +206,16 @@ every servo centres on any error, abort or interrupt.
 | LH | PULL when the first pivot of A→C is done | must be at O1 before the car enters the lower lane (~2.5 s later) |
 
 Offsets live in `Layout.cue`. At the HH/HL stop, the ultrasonic confirms the
-obstacle: a validated reading above 27 cm logs `OBSTACLE_LATE` (the run
-continues; redo the take). On LH the car stops on 3 consecutive readings below
-20 cm on the lower lane; if nothing shows up within 15 cm of entering the lane
-it stops anyway (`NO_OBSTACLE`) and still retraces to A.
+obstacle: a validated reading above 27 cm logs `OBSTACLE_LATE` and **ends the
+take** (`RETAKE`). The car is already stopped and does not back up or re-plan,
+because the re-plan to C crosses O0, where a late obstacle still is. Reset and
+run the take again.
+
+On LH the car stops on **2** consecutive valid readings below 20 cm on the
+lower lane (it normally rests ~12–13 cm into the lane). If nothing shows up
+within **20 cm** of entering the lane it stops anyway (`NO_OBSTACLE`) and still
+retraces to A; at that cap it is 9.5 cm from the obstacle's slide strip
+(`plan.py` checks ≥ 8 cm).
 
 ## How the executor times things
 
@@ -207,8 +244,9 @@ it stops anyway (`NO_OBSTACLE`) and still retraces to A.
 | Lands to one side | steering trim or radius table; redo `steering_trim` / `radius_table`. `repeat.py` says "tune the curve". |
 | Error grows with speed (HH, not HL) | servo swing time or `speed_tau_s` in `calibration.json`; redo `servo_swing`. |
 | `TAPE_MISSED` | strip not under the module: check `run.py --dry-run` positions and `grayscale_threshold` on the real floor and light. |
-| Stops early on a forward leg (`HARD_STOP` abort) | something within 12 cm of the ultrasonic. **If the arena has physical walls**, the front bumper is only ~12 cm from x = 150 at B/C/D. |
-| `OBSTACLE_LATE` | the pull came late or the obstacle didn't reach the bead; the take continues (the hard minimum still protects the car); redo it. |
+| Stops early on a forward leg (`HARD_STOP` abort) | something within 12 cm of the ultrasonic. Check the east side: no wall within 40 cm of x = 150. |
+| `RETAKE` (`OBSTACLE_LATE`) | the pull came late or the obstacle didn't reach the bead. The take ended at the stop; reset and run it again. |
+| Startup lists many DEFAULTS | expected before calibration; run the missing checks. Speed is capped only for `speed_table` / `radius_table` (`--no-cap` to override). |
 | `NO_OBSTACLE` on LH | obstacle not at O1 before the lower lane, or the reading came too late: check the cue and the ultrasonic. |
 | Wobbly LH pivots | `stop_settle_s` / `servo_settle_s` too short for this floor. |
 
@@ -217,12 +255,11 @@ it stops anyway (`NO_OBSTACLE`) and still retraces to A.
 * At HH's 50 cm/s, MAIN lands ~2.5 cm to the side with ~1° heading in the
   simulator (steering-swing shape at full lock); HL and LH land within ~1 cm.
   Tape stops absorb the along-track part; `repeat.py` shows what the real car does.
-* LH: the reading drops below 20 cm ~9.5 cm into the lower lane; with 3
-  confirmations and the coast the car rests ~14 cm in, close to the 15 cm cap.
-  The real car's threaded ultrasonic reads faster than the simulator, but
-  watch for false `NO_OBSTACLE` logs.
+* LH: the reading drops below 20 cm ~9.5 cm into the lower lane; with 2
+  confirmations and the coast the car rests ~12–13 cm in, well before the
+  20 cm cap.
 * The planned (never driven) LH A→C detour can only clear O0 by 5.3 cm with
   R30 pivots; it is drawn in the plot only.
-* With a late obstacle at HH speed, the re-plan heads for O0 and the hard
-  minimum stops it ~9 cm away. Safe in the simulator, but redo late takes
-  before anyone stands near the arena.
+* The HH/HL event starts on a full-lock arc from standstill. For HL this is
+  more abrupt than its other legs (turns at ~48°/s from rest); a lead-in
+  straight has been proposed but not applied.

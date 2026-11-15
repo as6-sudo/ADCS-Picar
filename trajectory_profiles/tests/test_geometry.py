@@ -156,30 +156,48 @@ class ResolvedMain(unittest.TestCase):
             self.assertEqual((got.direction, got.side, got.radius), (want.direction, want.side, want.radius))
             self.assertAlmostEqual(got.amount, want.amount, delta=0.01)
 
-    def test_solver_keeps_alt_and_close_in_their_clearance_bands(self):
-        for name, lead in (("ALT", 8.0), ("CLOSE", 10.0)):
-            lo, hi = LAYOUT.min_clearance[name], LAYOUT.max_clearance[name]
-            c = solver.solve(A, B, O0, CAR, LAYOUT, side1="R", lead_in=lead, min_clear=lo, max_clear=hi)
-            self.assertTrue(lo <= c.clearance <= hi, name)
+    def test_solver_keeps_close_in_its_clearance_band(self):
+        lo, hi = LAYOUT.min_clearance["CLOSE"], LAYOUT.max_clearance["CLOSE"]
+        c = solver.solve(A, B, O0, CAR, LAYOUT, side1="R", lead_in=10.0, min_clear=lo, max_clear=hi)
+        self.assertTrue(lo <= c.clearance <= hi)
 
     def test_solver_reports_no_solution(self):
         self.assertIsNone(solver.solve(A, B, O0, CAR, LAYOUT, side1="R", lead_in=12.0, min_clear=10.0))
 
 
 class ResolvedAlt(unittest.TestCase):
-    def test_alt_has_ramp_straights_and_stays_closer_than_main(self):
+    def main_poses(self):
+        return poses(A, paths.MAIN)
+
+    def test_alt_has_ramp_straights_and_clearance(self):
         for s in (paths.ALT[0], paths.ALT[-1]):
             self.assertFalse(s.is_arc)
             self.assertGreaterEqual(s.length, CAR.ramp_cm)
         c = clear(A, paths.ALT, O0)
-        self.assertTrue(LAYOUT.min_clearance["ALT"] <= c <= LAYOUT.max_clearance["ALT"])
-        self.assertLess(c, clear(A, paths.MAIN, O0))
+        self.assertGreaterEqual(c, LAYOUT.min_clearance["ALT"])
+        self.assertAlmostEqual(c, 12.9, delta=0.2)                # user's check: ~12.9 cm
         self.assertLess(g.pose_error(g.end_pose(A, paths.ALT, OFF), B)[0], 0.5)
 
-    def test_solver_regression(self):
+    def test_alt_looks_different_from_main(self):
+        d = g.path_difference(poses(A, paths.ALT), self.main_poses())
+        self.assertAlmostEqual(d, 5.0, delta=0.5)                 # user's check: ~5 cm
+        # more different than the previous ALT (R35/R80, 49°) and the brief's
+        old = g.segs("F 0 8 | F R R35 49 | F 0 0.59 | F L R80 49 | F 0 9.82")
+        self.assertGreater(d, g.path_difference(poses(A, old), self.main_poses()) + 1.0)
+        self.assertGreater(d, g.path_difference(poses(A, paths.ALT_BRIEF), self.main_poses()))
+
+    def test_solver_finds_no_more_different_alt(self):
+        ref = [p for p, _ in g.sample(A, paths.MAIN, OFF, 1.0)]
         c = solver.solve(A, B, O0, CAR, LAYOUT, side1="R", lead_in=CAR.ramp_cm,
-                         min_clear=LAYOUT.min_clearance["ALT"], max_clear=LAYOUT.max_clearance["ALT"])
-        self.assertEqual([str(s) for s in c.segments], [str(s) for s in paths.ALT])
+                         min_clear=LAYOUT.min_clearance["ALT"], reference=ref)
+        ours = g.path_difference([p for p, _ in g.sample(A, paths.ALT, OFF, 1.0)], ref)
+        self.assertLess(c.difference - ours, 0.1)
+
+    def test_path_difference(self):
+        a = [g.Pose(x, 0, 0) for x in range(0, 101, 10)]
+        b = [g.Pose(x, 3 if x == 50 else 0, 0) for x in range(0, 101, 10)]
+        self.assertAlmostEqual(g.path_difference(a, b), 3)
+        self.assertEqual(g.path_difference(a, a), 0)
 
 
 class Event(unittest.TestCase):
@@ -280,8 +298,11 @@ class Planner(unittest.TestCase):
             rep = check_profile("HH", replace(LAYOUT, tape=tape), CAR)
             self.assertFalse(any("tape stop" in f for f in rep.fails))
 
-    def test_car_model_reads_measured_values(self):
-        car = car_model({"car": {"half_width": "10", "min_radius": 32, "unknown": 1}})
+    def test_car_model_reads_measured_values_only_if_their_check_passed(self):
+        data = {"car": {"half_width": "10", "min_radius": 32, "unknown": 1}}
+        self.assertEqual(car_model(data), CAR)                                    # no checks passed
+        data["checks"] = {"footprint": True, "radius_table": True}
+        car = car_model(data)
         self.assertEqual((car.half_width, car.min_radius, car.front), (10.0, 32.0, CAR.front))
 
 

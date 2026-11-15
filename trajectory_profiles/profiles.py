@@ -17,6 +17,10 @@ from .params import PROFILES as BEHAVIOURS
 PROFILE_KEYS = ("HH", "HL", "LH", "LL")
 
 
+class Retake(ProfileAbort):
+    """The take cannot be used (e.g. the obstacle was late): stop and end it."""
+
+
 # ------------------------------------------------------------------ tape strips
 def arrival_speed(beh, motion):
     """Ground speed at which a leg reaches its target (end of the ramp-down)."""
@@ -62,7 +66,7 @@ def tape_spec(layout, target):
 # ------------------------------------------------------------------ the take
 class Take:
     def __init__(self, profile, executor, layout, car, motion, speed_scale=1.0, sim=None,
-                 log=print, cue_out=None):
+                 log=print, cue_out=None, tape_stops=True):
         if profile == "LL":
             raise NotImplementedError("Profile LL is out of scope for this framework (brief section 1).")
         self.p = profile
@@ -71,6 +75,7 @@ class Take:
         self.layout, self.car, self.m = layout, car, motion
         self.speed = self.beh.cruise_cm_s * speed_scale
         self.sim = sim
+        self.tape_stops = tape_stops     # False: no grayscale calibration -> timed stops
         self.log = log
         self.cue_out = cue_out or (lambda: print("\a\n" + "#" * 40 + "\n####" + " " * 12 + "PULL" + " " * 12 + "####\n"
                                                   + "#" * 40 + "\n", flush=True))
@@ -97,11 +102,17 @@ class Take:
         kw.setdefault("speed", self.speed)
         kw.setdefault("rolling", self.beh.rolling)
         kw.setdefault("ramp_fracs", self.beh.ramp_fracs)
-        res = self.ex.run(segments, leg=leg, tape=tape_spec(self.layout, tape_target) if tape_target else None, **kw)
+        res = self.ex.run(segments, leg=leg, tape=self.tape(tape_target), **kw)
         for name, detail in res.events:
             self.events.append((leg, name, detail))
         self.pose = g.end_pose(self.pose, [e.driven for e in res.entries], self.car.rear_to_centre)
         return res
+
+    def tape(self, target):
+        """TapeSpec for a target, or None (timed stop) if tape stops are off."""
+        if not target or not self.tape_stops:
+            return None
+        return tape_spec(self.layout, target)
 
     def gaze_at(self, point, leg):
         """Turn the head toward a point (x, y), hold, and look forward again."""
@@ -147,8 +158,11 @@ class Take:
         self.drive(name, approach)
         d = self.confirm_obstacle(name)
         if d is None or d > self.layout.event_late_cm:
-            self._event(name, "OBSTACLE_LATE", "reading %s cm > %.0f: redo this take"
+            # The re-plan to C crosses O0, where a late obstacle still is: never
+            # drive it. The car is already stopped; end the take here.
+            self._event(name, "OBSTACLE_LATE", "reading %s cm > %.0f"
                         % ("none" if d is None else "%.1f" % d, self.layout.event_late_cm))
+            raise Retake("obstacle was late (not at O1 when the car stopped): RETAKE")
         else:
             self._event(name, "OBSTACLE_CONFIRMED", "%.1f cm" % d)
         self.ex.wait(self.beh.surprise_pause_s)
@@ -173,10 +187,11 @@ class Take:
                 self.cue(name)
 
         res = self.drive(name, to_lane + [stop_seg],
-                         sensor_stop=SensorStop(self.layout.lh_detect_cm), on_segment_done=on_done)
+                         sensor_stop=SensorStop(self.layout.lh_detect_cm, confirm=self.layout.lh_confirm_readings),
+                         on_segment_done=on_done)
         self.ex.wait(self.beh.pause_at_target_s)
         back = self.ex.retrace(res.entries, leg=name, speed=self.speed, rolling=self.beh.rolling,
-                               ramp_fracs=self.beh.ramp_fracs, tape=tape_spec(self.layout, "A"))
+                               ramp_fracs=self.beh.ramp_fracs, tape=self.tape("A"))
         for n, detail in back.events:
             self.events.append((name, n, detail))
         self.pose = g.end_pose(self.pose, [e.driven for e in back.entries], self.car.rear_to_centre)
@@ -216,6 +231,9 @@ class Take:
         except EmergencyStop as e:
             self.log("[%s] EMERGENCY STOP: %s" % (self.p, e))
             self._event("-", "ESTOP", str(e))
+        except Retake as e:
+            self.log("[%s] RETAKE: %s" % (self.p, e))
+            self._event("-", "RETAKE", str(e))
         except ProfileAbort as e:
             self.log("[%s] aborted: %s" % (self.p, e))
             self._event("-", "ABORT", str(e))

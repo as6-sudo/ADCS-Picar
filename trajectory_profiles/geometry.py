@@ -234,6 +234,30 @@ def clearance(poses, polygon, car):
     return min(polygon_distance(footprint(p, car), polygon) for p in poses)
 
 
+def _y_at(poses, x):
+    """y of a path at x (linear between samples), or None outside its x range.
+    Assumes the path moves monotonically in x, as the A->target curves do."""
+    for a, b in zip(poses, poses[1:]):
+        if min(a.x, b.x) <= x <= max(a.x, b.x) and a.x != b.x:
+            return a.y + (b.y - a.y) * (x - a.x) / (b.x - a.x)
+    return None
+
+
+def path_difference(a, b, step=1.0):
+    """Largest sideways (y) distance between two centre paths, sampled every
+    `step` cm along x where both paths exist. Used to keep ALT visibly
+    different from MAIN on camera."""
+    lo = max(min(p.x for p in a), min(p.x for p in b))
+    hi = min(max(p.x for p in a), max(p.x for p in b))
+    best, x = 0.0, lo
+    while x <= hi + 1e-9:
+        ya, yb = _y_at(a, x), _y_at(b, x)
+        if ya is not None and yb is not None:
+            best = max(best, abs(ya - yb))
+        x += step
+    return best
+
+
 def edge_clearance(poses, car, width, height):
     """Smallest gap between the car footprint and the arena walls (negative = outside)."""
     best = float("inf")

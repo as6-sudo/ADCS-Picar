@@ -77,15 +77,17 @@ def main(argv=None):
     ap.add_argument("-n", type=int, default=5, help="number of runs (default 5)")
     ap.add_argument("--sim", action="store_true")
     ap.add_argument("--speed-scale", type=float, default=None)
+    ap.add_argument("--calibration", default=calibration.PATH, help="calibration.json to use")
+    ap.add_argument("--no-cap", action="store_true",
+                    help="never cap the speed, even without speed/radius calibration")
     args = ap.parse_args(argv)
 
-    cal = calibration.load()
-    car, motion, layout = calibration.car_model(cal), Motion(calibration.tables(cal)), LAYOUT
+    cal = calibration.load(args.calibration)
+    res, scale, tape_stops = calibration.startup(cal, sim=args.sim, no_cap=args.no_cap,
+                                                 speed_scale=args.speed_scale)
+    car, motion, layout = res.car, Motion(res.tables), LAYOUT
     leg = paths.legs(args.profile, layout, car)[args.leg - 1]
     target = layout.target(leg.end)
-    scale = args.speed_scale if args.speed_scale is not None else 1.0
-    if not args.sim and not calibration.all_passed(cal):
-        scale = min(scale, 0.5)
     points = []
     hw = None
     if not args.sim:
@@ -95,7 +97,7 @@ def main(argv=None):
     for i in range(args.n):
         if args.sim:
             from trajectory_profiles.sim import ArenaSim
-            hw = ArenaSim(layout, car, start=layout.target(leg.start), seed=i, tables=calibration.tables(cal),
+            hw = ArenaSim(layout, car, start=layout.target(leg.start), seed=i, tables=res.tables,
                           strips=list(profiles.strips(args.profile, layout, car, motion).values()))
             clock, ranger = hw, Ranger(hw, hw)
         else:
@@ -104,7 +106,8 @@ def main(argv=None):
             clock, ranger = RealClock(), ThreadedRanger(hw, None)
         ex = Executor(hw, motion, clock=clock, ranger=ranger, ramp_cm=car.ramp_cm, log=lambda *a: None)
         take = profiles.Take(args.profile, ex, layout, car, motion, speed_scale=scale,
-                             sim=hw if args.sim else None, log=lambda *a: None, cue_out=lambda: None)
+                             sim=hw if args.sim else None, log=lambda *a: None, cue_out=lambda: None,
+                             tape_stops=tape_stops)
         ok = take.run(only_leg=args.leg)
         if not ok:
             print("  run %d stopped early; not counted" % (i + 1))

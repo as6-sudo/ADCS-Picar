@@ -9,7 +9,6 @@ import os
 import sys
 import unittest
 from contextlib import redirect_stdout
-from dataclasses import replace
 
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
@@ -215,9 +214,14 @@ class Takes(unittest.TestCase):
         sim, ex, _ = make("HH")
         sim.start_pull = lambda delay=0.0: None          # nobody pulls the line
         t = profiles.Take("HH", ex, LAYOUT, CAR, M, sim=sim, cue_out=lambda: None, **QUIET)
-        t.run(only_leg=3)
+        self.assertFalse(t.run(only_leg=3))
         self.assertIn("OBSTACLE_LATE", names(t))
-        self.assertFalse(sim.collided)                   # the hard minimum still protects it
+        self.assertIn("RETAKE", names(t))
+        self.assertNotIn("ABORT", names(t))              # ended before the re-plan, not by the hard stop
+        # it never drove the back-up or the re-plan: it is still where the approach stopped
+        stop = g.end_pose(LAYOUT.target("A"), paths.event_approach(LAYOUT.event_stop_travel_cm), CAR.rear_to_centre)
+        self.assertLess(g.pose_error(sim.pose(), stop)[0], 2.0)
+        self.assertGreater(sim.min_obstacle_clearance, 15.0)
         at_rest_and_centred(self, sim)
 
     def test_lh_sensor_stop_position(self):
@@ -273,13 +277,13 @@ class RunCli(unittest.TestCase):
         self.assertIn("Tape strips", out.getvalue())
 
     def test_refuses_when_plan_fails(self):
-        orig = calibration.car_model
-        calibration.car_model = lambda cal=None: replace(CAR, half_width=13.0)
-        try:
-            with redirect_stdout(io.StringIO()):
-                self.assertEqual(run.main(["HL", "--sim"]), 2)
-        finally:
-            calibration.car_model = orig
+        import json
+        import tempfile
+        p = os.path.join(tempfile.mkdtemp(), "calibration.json")
+        with open(p, "w") as f:      # a measured car too wide for CLOSE
+            json.dump({"checks": {"footprint": True}, "car": {"half_width": 13.0}}, f)
+        with redirect_stdout(io.StringIO()):
+            self.assertEqual(run.main(["HL", "--dry-run", "--calibration", p]), 2)
 
 
 class Repeat(unittest.TestCase):

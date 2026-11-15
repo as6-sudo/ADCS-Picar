@@ -48,11 +48,11 @@ class Layout:
     lane_edge_margin: float = 4.5           # ...except the LH lanes, which sit at exactly 5.0
     min_clearance: dict = field(default_factory=lambda: {
         "MAIN": 10.0,       # brief 7 said 15; lowered to 10 for the re-solved MAIN with a lead-in (user decision)
-        "ALT": 10.0, "CLOSE": 6.0, "EVENT": 10.0, "LANE": 12.0, "STRAIGHT": 10.0,
+        "ALT": 9.0,         # ALT is chosen for its difference from MAIN; it only needs >= 9 cm
+        "CLOSE": 6.0, "EVENT": 10.0, "LANE": 12.0, "STRAIGHT": 10.0,
     })
-    # Solver only: ceilings that keep ALT and CLOSE visibly closer to the
-    # obstacle than MAIN (the brief's ALT is 11.1, CLOSE 6.8).
-    max_clearance: dict = field(default_factory=lambda: {"ALT": 12.0, "CLOSE": 8.0})
+    # Solver only: ceiling that keeps CLOSE visibly close (the brief's CLOSE is 6.8).
+    max_clearance: dict = field(default_factory=lambda: {"CLOSE": 8.0})
     end_tolerance_cm: float = 0.5           # ideal-model end-pose error (brief 9.1)
     end_tolerance_deg: float = 0.5
 
@@ -63,8 +63,12 @@ class Layout:
     # of the planned detour (5.3 cm); it cannot reach the 12 cm lane rule with
     # 3-step pivots at R30, so plan.py reports it as a warning (plot only).
     lh_c_final_straight_cm: float = 0.0
-    lh_detect_cm: float = 20.0              # sensor stop on the lower lane (3 consecutive)
-    lh_detect_cap_cm: float = 15.0          # stop anyway this far into the lane: NO_OBSTACLE
+    lh_detect_cm: float = 20.0              # sensor stop on the lower lane...
+    lh_confirm_readings: int = 2            # ...on this many consecutive valid readings (was 3; user, 2026-11-15)
+    # Stop anyway this far into the lane: NO_OBSTACLE. Was 15; raised to 20
+    # (user, 2026-11-15) because the car rests ~14 cm in after a normal stop.
+    lh_detect_cap_cm: float = 20.0
+    lh_cap_min_clear: float = 8.0           # at the cap the car must stay this far from the slide strip
 
     # HH/HL obstacle event (brief 5).
     event_stop_travel_cm: float = 23.5      # fixed travel before the stop (not sensor-based)

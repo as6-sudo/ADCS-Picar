@@ -308,8 +308,12 @@ def main():
         else:
             car.stop()
     print("\nchecks:", cal["checks"])
-    print("All passed -> full speed enabled." if calibration.all_passed(cal)
-          else "Not all passed -> run.py stays at 50 % speed.")
+    res = calibration.resolve(cal)
+    cap, why = res.speed_cap()
+    print("Speed: %s" % ("full speed" if cap is None else
+                         "run.py caps at %.0f %% until %s pass (or use --no-cap)" % (cap * 100, " and ".join(why))))
+    for line in res.warnings():
+        print(line)
     print("Next: copy calibration.json to the laptop and run plan.py; it must pass.")
     return 0 if ok_all else 1
 

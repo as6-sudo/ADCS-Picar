@@ -1,15 +1,16 @@
 """Car model, calibration tables and calibration.json (written by calibrate.py).
 
 calibration.json is per car, so it is git-ignored. Anything missing from it
-falls back to the defaults below. The defaults are ESTIMATES (they match the
-simulator in sim.py), good enough for --sim and for a first look at 50 %
-speed, never for filming. run.py caps speed at 50 % until every check in
-CHECKS has passed.
+falls back to the defaults below, VALUE BY VALUE: a value is used only if
+the calibrate.py check that measures it passed (VALUE_CHECK). The defaults
+are ESTIMATES (they match the simulator in sim.py). Calibration never blocks
+a run: run.py only caps speed at 50 % while the speed or radius table is
+missing (unless --no-cap), and warns about everything else.
 """
 import json
 import math
 import os
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, replace
 
 PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "calibration.json")
 
@@ -97,15 +98,126 @@ def all_passed(data):
     return all(passed(data, c) for c in CHECKS)
 
 
+# Which calibrate.py check measures each value. A value is used only if its
+# check PASSED (and the value is in the file); otherwise the default is used.
+VALUE_CHECK = {
+    "car.rear": "footprint", "car.front": "footprint", "car.half_width": "footprint",
+    "car.rear_to_centre": "footprint", "car.ultrasonic_offset": "footprint",
+    "steer_trim_deg": "steering_trim",
+    "speed_table": "speed_table",
+    "radius_table": "radius_table", "arc_speed_correction": "radius_table", "car.min_radius": "radius_table",
+    "servo_s_per_deg": "servo_swing",
+    "grayscale_threshold": "grayscale_threshold",
+    "car.grayscale_offset": "grayscale_offset", "tape_overshoot": "grayscale_offset",
+}
+# Values no check measures: always the estimates in this file.
+UNMEASURED = ("car.ramp_cm", "speed_tau_s", "servo_settle_s", "stop_settle_s")
+
+# Without these, distance->time or radius->steering is a guess: cap speed at 50 %.
+SPEED_CRITICAL = ("speed_table", "radius_table")
+UNCALIBRATED_SPEED_SCALE = 0.5      # brief 6.6
+
+# What else is affected when a check is missing or failed (warnings only).
+EFFECT = {
+    "api": "the installed picarx was not checked",
+    "ultrasonic": "the ultrasonic was not checked: sensor stops and the hard stop are unverified",
+    "motors": "motor directions were not checked",
+    "footprint": "clearances use the brief's estimated car size",
+    "steering_trim": "no steering trim: straights may drift",
+    "servo_swing": "steering-swing timing is an estimate (HH/HL arcs)",
+    "grayscale_threshold": "TAPE STOPS DISABLED: legs end on timed stops",
+    "grayscale_offset": "tape strip positions use the estimated grayscale offset",
+}
+
+
+def _value(cal, key):
+    if key.startswith("car."):
+        return cal.get("car", {}).get(key[4:])
+    return cal.get(key)
+
+
+class Resolved:
+    """calibration.json resolved value by value.
+
+    measured: values whose check passed; defaults: [(value, reason)] for the
+    rest; missing_checks: checks never run or failed."""
+
+    def __init__(self, cal=None):
+        cal = cal or {}
+        self.checks = dict(cal.get("checks", {}))
+        self.measured, self.defaults = [], []
+        car_kw, tab = {}, dict(DEFAULT_TABLES)
+        for key, check in VALUE_CHECK.items():
+            v = _value(cal, key)
+            state = self.checks.get(check)
+            if state and v is not None:
+                self.measured.append(key)
+                if key.startswith("car."):
+                    car_kw[key[4:]] = float(v)
+                else:
+                    tab[key] = v
+            else:
+                reason = ("check failed" if state is False else
+                          "check not run" if check not in self.checks else "not in file")
+                self.defaults.append((key, "%s (%s)" % (reason, check)))
+        self.car = replace(DEFAULT_CAR, **car_kw)
+        self.tables = tab
+        self.missing_checks = [c for c in CHECKS if not self.checks.get(c)]
+
+    def speed_cap(self):
+        """0.5 if speed or turning calibration is missing/failed, else None."""
+        bad = [c for c in SPEED_CRITICAL if c in self.missing_checks]
+        return (UNCALIBRATED_SPEED_SCALE, bad) if bad else (None, [])
+
+    @property
+    def tape_stops(self):
+        return "grayscale_threshold" not in self.missing_checks
+
+    def warnings(self):
+        out = []
+        if self.defaults:
+            out.append("Calibration: using DEFAULTS for %s" % ", ".join(k for k, _ in self.defaults))
+            for k, why in self.defaults:
+                out.append("    %-22s %s" % (k, why))
+        for c in self.missing_checks:
+            if c in EFFECT:
+                out.append("  -> %s: %s" % (c, EFFECT[c]))
+        out.append("Estimates (no check measures them): %s" % ", ".join(UNMEASURED))
+        return out
+
+
+def resolve(cal=None):
+    return Resolved(cal)
+
+
 def car_model(cal=None):
-    """CarModel with any measured values from calibration.json's "car" section."""
-    measured = (cal or {}).get("car", {})
-    known = {f.name for f in fields(CarModel)}
-    return replace(DEFAULT_CAR, **{k: float(v) for k, v in measured.items() if k in known})
+    """CarModel: measured values whose calibration check passed, defaults otherwise."""
+    return Resolved(cal).car
 
 
 def tables(cal=None):
-    """Calibration tables: measured values where present, defaults otherwise."""
-    t = dict(DEFAULT_TABLES)
-    t.update({k: v for k, v in (cal or {}).items() if k in DEFAULT_TABLES})
-    return t
+    """Calibration tables: measured values whose check passed, defaults otherwise."""
+    return Resolved(cal).tables
+
+
+def startup(cal, *, sim=False, no_cap=False, speed_scale=None, out=print):
+    """Resolve calibration for a run. Never refuses.
+
+    Returns (Resolved, speed scale, tape_stops). Prints which values are
+    defaults, what that affects, and whether speed is capped."""
+    res = Resolved(cal)
+    scale = 1.0 if speed_scale is None else speed_scale
+    for line in res.warnings():
+        out(line)
+    if sim:
+        # the simulated car's "truth" matches the defaults: no cap, tape stops on
+        return res, scale, True
+    cap, why = res.speed_cap()
+    if no_cap:
+        out("WARNING: --no-cap: speed is NOT capped%s"
+            % (" although %s not calibrated" % " and ".join(why) if why else ""))
+    elif cap is not None and scale > cap:
+        out("Speed capped at %.0f%% because %s not calibrated (--no-cap removes the cap)."
+            % (cap * 100, " and ".join(why)))
+        scale = cap
+    return res, scale, res.tape_stops

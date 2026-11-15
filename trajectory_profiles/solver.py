@@ -33,6 +33,7 @@ class Candidate:
     final: float
     clearance: float
     edge: float
+    difference: float = 0.0     # max sideways distance from the reference path (if any)
 
 
 def frange(lo, hi, step):
@@ -70,12 +71,16 @@ def two_arc(start, target, lead_in, side1, a1, r1, r2, offset):
 
 def solve(start, target, obstacle, car, layout, *, side1, lead_in, min_clear,
           angles=None, r1s=None, r2s=None, max_mid=10.0, min_final=None,
-          edge_margin=None, step=1.0, max_clear=None):
+          edge_margin=None, step=1.0, max_clear=None, reference=None):
     """Best Candidate, or None if nothing satisfies the rules.
 
     obstacle: polygon (e.g. geometry.box(*layout.o0, layout.obstacle_half)).
     min_final defaults to car.ramp_cm (room to slow down on a straight).
-    max_clear (optional) keeps ALT/CLOSE visibly closer to the obstacle than MAIN."""
+    max_clear (optional) keeps CLOSE in its band.
+    reference (optional): a list of centre poses (e.g. MAIN's). When given, the
+    objective becomes "largest sideways difference from the reference path"
+    (geometry.path_difference), so ALT reads as a different curve on camera;
+    ties go to the larger clearance."""
     angles = angles or frange(20, 60, 1)
     r1s = r1s or frange(max(car.min_radius, 30), 60, 5)
     r2s = r2s or frange(50, 250, 5)
@@ -98,6 +103,10 @@ def solve(start, target, obstacle, car, layout, *, side1, lead_in, min_clear,
                 cheap.append((-r2, mid, a1, r1, s))
     cheap.sort(key=lambda c: c[:2])
 
+    if reference is not None:
+        return _solve_difference(cheap, start, obstacle, car, layout, reference, min_clear, max_clear,
+                                 edge_margin, step)
+
     best, best_r2 = None, None
     for neg_r2, mid, a1, r1, s in cheap:
         if best_r2 is not None and -neg_r2 < best_r2:
@@ -112,4 +121,24 @@ def solve(start, target, obstacle, car, layout, *, side1, lead_in, min_clear,
         cand = Candidate(tuple(s), a1, r1, -neg_r2, s[-2].amount, mid, s[-1].amount, c, e)
         if best is None or (cand.mid, -cand.clearance) < (best.mid, -best.clearance):
             best, best_r2 = cand, -neg_r2
+    return best
+
+
+def _solve_difference(cands, start, obstacle, car, layout, reference, min_clear, max_clear, edge_margin, step):
+    off = car.rear_to_centre
+    best = None
+    for neg_r2, mid, a1, r1, s in cands:
+        poses = [p for p, _ in g.sample(start, s, off, step)]
+        d = g.path_difference(poses, reference)
+        if best is not None and d < best.difference - 1e-9:
+            continue                   # cheap test first: can't win
+        e = g.edge_clearance(poses, car, layout.width, layout.height)
+        if e < edge_margin:
+            continue
+        c = g.clearance(poses, obstacle, car)
+        if c < min_clear or (max_clear is not None and c > max_clear):
+            continue
+        cand = Candidate(tuple(s), a1, r1, -neg_r2, s[-2].amount, mid, s[-1].amount, c, e, d)
+        if best is None or (round(d, 2), c) > (round(best.difference, 2), best.clearance):
+            best = cand
     return best

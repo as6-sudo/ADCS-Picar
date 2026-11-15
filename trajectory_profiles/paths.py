@@ -30,10 +30,14 @@ MAIN = segs("F 0 8 | F R R30 49 | F 0 0.59 | F L R85 49 | F 0 9.82")
 # on a 5 cm straight into A.
 ALT_BRIEF = segs("F 0 5 | F R R40 45 | F 0 6.9 | F L R80 45 | F 0 10.3")
 
-# ALT re-solved with an 8 cm lead-in (user decision, 2026-11-14):
-# `plan.py --solve`, lead_in = 8 cm, clearance band 10..12 cm to O0.
-# Result: O0 clearance 10.5 cm (MAIN 12.8), edge 7.0 cm.
-ALT = segs("F 0 8 | F R R35 49 | F 0 0.59 | F L R80 49 | F 0 9.82")
+# ALT chosen to look DIFFERENT from MAIN on camera (user decision, 2026-11-15):
+# steeper dive, early flatten, long final straight (room for HL to ramp when
+# reversing from D). Selected by the largest sideways distance from MAIN's
+# path (geometry.path_difference) with the 8 cm lead-in and >= 9 cm to O0.
+# User's design, verified: O0 clearance 12.8 cm, 5.3 cm max difference from
+# MAIN. `plan.py --solve` finds the optimum at 60° / no mid straight, 0.04 cm
+# more difference: the same curve for the eye.
+ALT = segs("F 0 8 | F R R30 58 | F 0 2.8 | F L R50 58 | F 0 27.7")
 CLOSE = segs("F 0 10 | F R R40 47 | F 0 6.9 | F L R70 47 | F 0 9.9")       # brief 5, 6.8 cm (on purpose)
 CURVES = {"MAIN": MAIN, "ALT": ALT, "CLOSE": CLOSE}
 
@@ -96,6 +100,13 @@ def lh_lane_ac_planned(layout, car):
     north = c.y - over[1] - up[1] - lane_start.y
     lane = head + [_straight(south)] + left_pivot(r)
     return lane, lane + [_straight(east)] + left_pivot(r) + [_straight(north)] + right_pivot(r) + [_straight(final)]
+
+
+def lh_cap_pose(layout, car):
+    """Car-centre pose if the LH lower-lane stop only happens at the cap."""
+    lane, _ = lh_lane_ac_planned(layout, car)
+    return g.end_pose(layout.target("A"), lane + [g.Segment("F", "0", 0, layout.lh_detect_cap_cm)],
+                      car.rear_to_centre)
 
 
 def lh_lane_stop_cm(layout, car):
@@ -193,8 +204,8 @@ def legs(profile, layout, car):
                 Phase("lane to obstacle (obstacle moving)", driven, "SWEEP", "LANE", lane_m),
                 Phase("retrace to A", g.retrace(driven), "O1", "LANE", lane_m)],
                 planned=[(A, planned_c)], planned_kind="LANE",
-                note="sensor stop below %.0f cm (3 readings), cap %.0f cm into the lane"
-                     % (layout.lh_detect_cm, layout.lh_detect_cap_cm)),
+                note="sensor stop below %.0f cm (%d readings), cap %.0f cm into the lane"
+                     % (layout.lh_detect_cm, layout.lh_confirm_readings, layout.lh_detect_cap_cm)),
             Leg(4, "A->D lane mirrored", "A", "D", [Phase("lane mirrored", lane_d, "O1", "LANE", lane_m)]),
         ]
     if profile == "LL":

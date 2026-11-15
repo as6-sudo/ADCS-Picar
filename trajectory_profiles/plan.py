@@ -105,6 +105,15 @@ def check_profile(profile, layout=DEFAULT_LAYOUT, car=None):
                 rep.warnings.append("%s ends with %s: shorter than the %.0f cm ramp, slows down on the last arc"
                                     % (tag, last, car.ramp_cm))
 
+        # LH: even if the stop only happens at the cap, keep clear of the slide strip
+        if profile == "LH" and leg.start == leg.end:
+            cap = paths.lh_cap_pose(layout, car)
+            c = g.polygon_distance(g.footprint(cap, car), paths.obstacle_polygons("SWEEP", layout)[0])
+            rep.rows[-1]["note"] = "at the %.0f cm cap: %.1f cm to the slide strip" % (layout.lh_detect_cap_cm, c)
+            if c < layout.lh_cap_min_clear:
+                rep.fails.append("%s: at the %.0f cm cap the car is %.1f cm from the slide strip < %.0f"
+                                 % (tag, layout.lh_detect_cap_cm, c, layout.lh_cap_min_clear))
+
         # event: ultrasonic confirmation at the stop
         if leg.name.endswith("event"):
             stop = g.end_pose(layout.target("A"), leg.phases[0].segments, off)
@@ -189,6 +198,13 @@ def plot_profile(profile, layout, car, path):
     plt.close(fig)
 
 
+def alt_main_difference(start, car):
+    """Largest sideways distance between the ALT and MAIN centre paths (cm)."""
+    off = car.rear_to_centre
+    return g.path_difference([p for p, _ in g.sample(start, paths.ALT, off, 1.0)],
+                             [p for p, _ in g.sample(start, paths.MAIN, off, 1.0)])
+
+
 # ------------------------------------------------------------------ solver front-end
 def run_solver(layout, car):
     A, B, C = layout.target("A"), layout.target("B"), layout.target("C")
@@ -203,7 +219,8 @@ def run_solver(layout, car):
             print("  solved : NO SOLUTION")
             return
         print("  solved : " + g.fmt(cand.segments))
-        print("           clearance %.1f cm, edge %.1f cm" % (cand.clearance, cand.edge))
+        print("           clearance %.1f cm, edge %.1f cm%s" % (
+            cand.clearance, cand.edge, ", %.1f cm from MAIN" % cand.difference if cand.difference else ""))
 
     mc = layout.min_clearance
     main = solver.solve(A, B, O0, car, layout, side1="R", lead_in=car.ramp_cm, min_clear=mc["MAIN"])
@@ -212,10 +229,12 @@ def run_solver(layout, car):
         fb = solver.solve(A, B, O0, car, layout, side1="R", lead_in=0, min_clear=mc["MAIN"])
         show("MAIN fallback (no lead-in: ramp up during the pull-out arc, calibrate the ramp-in-arc distance)",
              fb, paths.MAIN_BRIEF)
-    show("ALT (lead-in max(5, ramp), %.0f..%.0f cm to O0)" % (mc["ALT"], layout.max_clearance["ALT"]),
-         solver.solve(A, B, O0, car, layout, side1="R", lead_in=max(5.0, car.ramp_cm), min_clear=mc["ALT"],
-                      max_clear=layout.max_clearance["ALT"]),
+    main_poses = [p for p, _ in g.sample(A, main.segments if main else paths.MAIN, off, 1.0)]
+    show("ALT (lead-in = ramp, >= %.0f cm to O0, most different from MAIN)" % mc["ALT"],
+         solver.solve(A, B, O0, car, layout, side1="R", lead_in=car.ramp_cm, min_clear=mc["ALT"],
+                      reference=main_poses),
          paths.ALT)
+    print("           current ALT differs from MAIN by %.1f cm" % alt_main_difference(A, car))
     show("CLOSE (lead-in max(10, ramp), %.0f..%.0f cm to O0)" % (mc["CLOSE"], layout.max_clearance["CLOSE"]),
          solver.solve(A, B, O0, car, layout, side1="R", lead_in=max(10.0, car.ramp_cm), min_clear=mc["CLOSE"],
                       max_clear=layout.max_clearance["CLOSE"]),
@@ -260,6 +279,8 @@ def main(argv=None):
                 print("  saved %s" % f)
             except ImportError:
                 print("  (matplotlib not installed: no PNG)")
+    print("\nALT vs MAIN: max sideways difference %.1f cm (how different HL legs 1 and 2 look)"
+          % alt_main_difference(layout.target("A"), car))
     print("\n%s" % ("ALL CHECKS PASSED" if ok else "SOME CHECKS FAILED: do not run these paths on the car"))
     return 0 if ok else 1
 
