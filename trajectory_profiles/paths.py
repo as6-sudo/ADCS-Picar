@@ -25,7 +25,15 @@ MAIN_BRIEF = segs("F R R30 45 | F 0 2.7 | F L R100 45 | F 0 11.2")
 # Result: O0 clearance 12.8 cm, edge 7.0 cm. The long arc is R85 (was R100).
 MAIN = segs("F 0 8 | F R R30 49 | F 0 0.59 | F L R85 49 | F 0 9.82")
 
-ALT = segs("F 0 5 | F R R40 45 | F 0 6.9 | F L R80 45 | F 0 10.3")         # brief 5, 11.1 cm
+# The brief's ALT (section 5, 11.1 cm). Kept for reference and tests: its
+# 5 cm lead-in is shorter than the ramp, so retraced (HL leg 2) it would end
+# on a 5 cm straight into A.
+ALT_BRIEF = segs("F 0 5 | F R R40 45 | F 0 6.9 | F L R80 45 | F 0 10.3")
+
+# ALT re-solved with an 8 cm lead-in (user decision, 2026-11-14):
+# `plan.py --solve`, lead_in = 8 cm, clearance band 10..12 cm to O0.
+# Result: O0 clearance 10.5 cm (MAIN 12.8), edge 7.0 cm.
+ALT = segs("F 0 8 | F R R35 49 | F 0 0.59 | F L R80 49 | F 0 9.82")
 CLOSE = segs("F 0 10 | F R R40 47 | F 0 6.9 | F L R70 47 | F 0 9.9")       # brief 5, 6.8 cm (on purpose)
 CURVES = {"MAIN": MAIN, "ALT": ALT, "CLOSE": CLOSE}
 

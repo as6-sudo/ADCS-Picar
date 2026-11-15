@@ -108,7 +108,7 @@ class BriefNumbersReproduce(unittest.TestCase):
     """The brief's design values (section 5) in our model."""
 
     def test_brief_main_alt_close_reach_b_with_their_clearances(self):
-        for s, brief_clear, lo in ((paths.MAIN_BRIEF, 15.8, 15), (paths.ALT, 11.1, 10), (paths.CLOSE, 6.8, 6)):
+        for s, brief_clear, lo in ((paths.MAIN_BRIEF, 15.8, 15), (paths.ALT_BRIEF, 11.1, 10), (paths.CLOSE, 6.8, 6)):
             self.assertLess(g.pose_error(g.end_pose(A, s, OFF), B)[0], 0.5)
             c = clear(A, s, O0)
             self.assertGreaterEqual(c, lo)
@@ -164,6 +164,22 @@ class ResolvedMain(unittest.TestCase):
 
     def test_solver_reports_no_solution(self):
         self.assertIsNone(solver.solve(A, B, O0, CAR, LAYOUT, side1="R", lead_in=12.0, min_clear=10.0))
+
+
+class ResolvedAlt(unittest.TestCase):
+    def test_alt_has_ramp_straights_and_stays_closer_than_main(self):
+        for s in (paths.ALT[0], paths.ALT[-1]):
+            self.assertFalse(s.is_arc)
+            self.assertGreaterEqual(s.length, CAR.ramp_cm)
+        c = clear(A, paths.ALT, O0)
+        self.assertTrue(LAYOUT.min_clearance["ALT"] <= c <= LAYOUT.max_clearance["ALT"])
+        self.assertLess(c, clear(A, paths.MAIN, O0))
+        self.assertLess(g.pose_error(g.end_pose(A, paths.ALT, OFF), B)[0], 0.5)
+
+    def test_solver_regression(self):
+        c = solver.solve(A, B, O0, CAR, LAYOUT, side1="R", lead_in=CAR.ramp_cm,
+                         min_clear=LAYOUT.min_clearance["ALT"], max_clear=LAYOUT.max_clearance["ALT"])
+        self.assertEqual([str(s) for s in c.segments], [str(s) for s in paths.ALT])
 
 
 class Event(unittest.TestCase):
