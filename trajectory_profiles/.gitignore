@@ -1,0 +1,5 @@
+calibration.json
+__pycache__/
+*.pyc
+plots/
+logs/
