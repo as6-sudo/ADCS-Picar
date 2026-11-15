@@ -96,7 +96,7 @@ def check_profile(profile, layout=DEFAULT_LAYOUT, car=None):
                              "(set mode='last_n' for %s)" % (tag, leg.end, leg.end))
 
         # ramps (warnings: the leg still runs, just without that ramp)
-        if beh.ramps:
+        if beh.ramp_fracs:
             first = leg.segments[0]
             if first.is_arc or first.length < car.ramp_cm:
                 rep.warnings.append("%s starts with %s: no %.0f cm straight to ramp up on, starts at constant speed"

@@ -18,6 +18,10 @@ class TapeStop:
     # useful if a leg must end on an arc. Approved fallback, default 12 cm.
     mode: str = "final_straight"            # "final_straight" | "last_n"
     last_n_cm: float = 12.0
+    # In final_straight mode the check arms for at most the last
+    # `arm_window_cm` of the straight, so a long final straight (C->A, 105 cm)
+    # doesn't stop on the strip it starts on.
+    arm_window_cm: float = 15.0
     # If no strip is seen this many cm past the expected stop, stop anyway
     # and log TAPE_MISSED (brief 6.5, value is a starting guess).
     miss_margin_cm: float = 4.0
@@ -66,10 +70,14 @@ class Layout:
     event_stop_travel_cm: float = 23.5      # fixed travel before the stop (not sensor-based)
     event_late_cm: float = 27.0             # validated reading above this -> OBSTACLE_LATE
 
-    # Tape stops per target (brief 6.5).
+    # Tape stops per target (brief 6.5). Strips are dark tape across the path:
+    # strip_width along x, strip_length along y (centred on the target's y).
+    strip_width_cm: float = 2.5
+    strip_length_cm: float = 12.0
     tape: dict = field(default_factory=lambda: {t: TapeStop() for t in "ABCD"})
 
     # Operator cue offsets in seconds, relative to the PULL cue (brief 8).
+    operator_reaction_s: float = 0.2        # simulator only: cue -> line starts moving
     cue: dict = field(default_factory=lambda: {
         "HH": 0.3,          # robot starts the A→C drive 0.3 s after the cue
         "HL": 0.0,          # robot starts with the cue
