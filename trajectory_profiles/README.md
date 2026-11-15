@@ -32,6 +32,8 @@ reuses their e-stop, reading validation, hard-minimum constants and `SimCar`.
 | `sim.py` | `ArenaSim`: SimCar + layout, sliding obstacle, floor strips, servo slew, picarx's inner-wheel slowdown |
 | `run.py` | **car**: run a take or one leg; `--sim`, `--dry-run`, `--speed-scale`; CSV log |
 | `calibrate.py` | **car**: interactive calibration → `calibration.json` |
+| `calibrate_speed_ultrasonic.py` | **car**: hands-free `speed_table`: drives at a wall ~1.5 m ahead and measures each run with the ultrasonic (`--cmds` re-measures some commands) |
+| `place_obstacle.py` | **car**: live ultrasonic readout for placing the obstacle at O0 with the car at A (the car does not move) |
 | `repeat.py` | **car**: repeatability (run one leg N times, enter landings, get a recommendation) |
 | `tests/` | `unittest`, runs on a laptop without hardware |
 
