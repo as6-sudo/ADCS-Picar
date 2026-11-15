@@ -201,15 +201,15 @@ every servo centres on any error, abort or interrupt.
 
 | Profile | Cue | Robot |
 |---|---|---|
-| HH | PULL at t = 0 | starts the A→C drive at +0.3 s, stops ≈1.1 s |
+| HH | PULL at t = 0 | starts the A→C drive at **+0.5 s**, stops ≈1.3 s |
 | HL | PULL at t = 0 | starts the A→C drive at **+0.3 s**, stops ≈1.4 s |
 | LH | PULL when the first pivot of A→C is done | must be at O1 before the car enters the lower lane (~2.5 s later) |
 
-The start offsets live in `Layout.cue` (`"HH": 0.3`, `"HL": 0.3`). The obstacle
+The start offsets live in `Layout.cue` (`"HH": 0.5`, `"HL": 0.3`). The obstacle
 needs about 1.0 s to reach O1 (≈0.2 s reaction + ≈0.8 s to slide 30 cm; the
 simulator uses these, `Layout.operator_reaction_s` / `obstacle_slide_cm_s`), so
-HL's stop at ≈1.4 s leaves ≈0.4 s of margin. HH's stop at ≈1.1 s leaves only
-≈0.1 s: pull promptly on HH, or raise `cue["HH"]`.
+HL's stop at ≈1.4 s leaves ≈0.4 s of margin and HH's stop at ≈1.3 s ≈0.3 s.
+If late obstacles still end takes, raise the profile's `cue` offset.
 
 At the HH/HL stop, the ultrasonic confirms the
 obstacle: a validated reading above 27 cm logs `OBSTACLE_LATE` and **ends the

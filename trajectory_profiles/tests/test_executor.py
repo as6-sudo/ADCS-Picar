@@ -248,7 +248,7 @@ class Takes(unittest.TestCase):
 
     def test_cue_timing(self):
         reach = LAYOUT.operator_reaction_s + 30 / LAYOUT.obstacle_slide_cm_s     # obstacle at O1
-        for profile, leg, expect, tol in (("HH", 3, 1.0, 0.15), ("HL", 5, 1.4, 0.1)):
+        for profile, leg, expect, tol in (("HH", 3, 1.3, 0.1), ("HL", 5, 1.4, 0.1)):
             ok, sim, t, recs = take(profile, only_leg=leg)
             self.assertTrue(ok, profile)
             cue = [s for s, k in recs if k.get("event") == "CUE"][0]

@@ -89,7 +89,10 @@ class Layout:
     # Operator cue offsets in seconds, relative to the PULL cue (brief 8).
     operator_reaction_s: float = 0.2        # simulator only: cue -> line starts moving (user estimate)
     cue: dict = field(default_factory=lambda: {
-        "HH": 0.3,          # robot starts the A→C drive 0.3 s after the cue
+        # HH robot starts 0.5 s after the cue (user, 2026-11-15; the brief said 0.3):
+        # with a ~1.0 s pull, 0.3 s left only ~0.1 s between the obstacle reaching
+        # O1 and the stop; 0.5 s gives ~0.3 s.
+        "HH": 0.5,
         # HL robot starts 0.3 s after the cue (user, 2026-11-15): with the 5 cm
         # lead-in the stop came 1.1 s after the cue, only ~0.1 s after the
         # obstacle arrives; +0.3 s puts the stop at ~1.4 s (brief 8).
