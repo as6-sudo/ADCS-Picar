@@ -1,0 +1,3 @@
+opencv-contrib-python>=4.8   # ArUco module; tested with 5.1.0
+numpy
+matplotlib                    # only for printing the marker sheets
